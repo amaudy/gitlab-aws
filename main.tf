@@ -26,10 +26,46 @@ data "aws_ami" "ubuntu" {
   owners = ["099720109477"] # Canonical
 }
 
+# Add IAM role and instance profile for Session Manager
+resource "aws_iam_role" "gitlab_instance_role" {
+  name = "gitlab-instance-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "gitlab-instance-role"
+    Environment = var.environment
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "systems_manager" {
+  role       = aws_iam_role.gitlab_instance_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "gitlab_instance_profile" {
+  name = "gitlab-instance-profile"
+  role = aws_iam_role.gitlab_instance_role.name
+}
+
 resource "aws_instance" "gitlab" {
   ami           = data.aws_ami.ubuntu.id
   instance_type = var.instance_type
   subnet_id     = data.aws_subnets.default.ids[0] # Use first subnet from default VPC
+
+  # Add IAM instance profile
+  iam_instance_profile = aws_iam_instance_profile.gitlab_instance_profile.name
 
   root_block_device {
     volume_size = var.volume_size
@@ -40,6 +76,12 @@ resource "aws_instance" "gitlab" {
 
   user_data = <<-EOF
               #!/bin/bash
+              # Install SSM Agent
+              snap install amazon-ssm-agent --classic
+              systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service
+              systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service
+
+              # Install GitLab
               apt-get update
               apt-get install -y curl openssh-server ca-certificates tzdata perl
               curl https://packages.gitlab.com/install/repositories/gitlab/gitlab-ee/script.deb.sh | bash
