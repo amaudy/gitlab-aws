@@ -1,0 +1,12 @@
+# AWS Configuration
+aws_region    = "us-east-1"
+instance_type = "t3.large"
+environment   = "production"
+
+# GitLab Configuration
+gitlab_domain = "gitlab.example.com"
+volume_size   = 100
+
+# Cloudflare Configuration
+cloudflare_zone_id   = "xxx"
+cloudflare_api_token = "xxx"
