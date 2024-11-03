@@ -90,17 +90,28 @@ resource "aws_instance" "gitlab" {
 
   user_data = <<-EOF
               #!/bin/bash
+              
+              # Install CloudWatch Agent first
+              apt-get update
+              apt-get install -y amazon-cloudwatch-agent
+
               # Install SSM Agent
               snap install amazon-ssm-agent --classic
               systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service
               systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service
 
-              # Install CloudWatch Agent
-              apt-get update
-              apt-get install -y amazon-cloudwatch-agent
-              
+              # Install GitLab
+              apt-get install -y curl openssh-server ca-certificates tzdata perl
+              curl https://packages.gitlab.com/install/repositories/gitlab/gitlab-ee/script.deb.sh | bash
+              EXTERNAL_URL="https://${var.gitlab_domain}" apt-get install gitlab-ee
+
+              # Wait for GitLab logs directory to be created
+              while [ ! -d "/var/log/gitlab" ]; do
+                sleep 10
+              done
+
               # Create CloudWatch Agent configuration
-              cat > /opt/aws/amazon-cloudwatch-agent/bin/config.json <<'CWAGENTCONFIG'
+              cat > /opt/aws/amazon-cloudwatch-agent/config.json <<'CWAGENTCONFIG'
               {
                 "agent": {
                   "metrics_collection_interval": 60,
@@ -114,19 +125,36 @@ resource "aws_instance" "gitlab" {
                           "file_path": "/var/log/gitlab/gitlab-rails/production.log",
                           "log_group_name": "${aws_cloudwatch_log_group.gitlab.name}",
                           "log_stream_name": "{instance_id}-gitlab-rails",
-                          "timestamp_format": "%Y-%m-%d %H:%M:%S"
+                          "timestamp_format": "%Y-%m-%d %H:%M:%S",
+                          "timezone": "UTC"
                         },
                         {
                           "file_path": "/var/log/gitlab/nginx/gitlab_access.log",
                           "log_group_name": "${aws_cloudwatch_log_group.gitlab.name}",
                           "log_stream_name": "{instance_id}-nginx-access",
-                          "timestamp_format": "%d/%b/%Y:%H:%M:%S %z"
+                          "timestamp_format": "%d/%b/%Y:%H:%M:%S %z",
+                          "timezone": "UTC"
                         },
                         {
                           "file_path": "/var/log/gitlab/nginx/gitlab_error.log",
                           "log_group_name": "${aws_cloudwatch_log_group.gitlab.name}",
                           "log_stream_name": "{instance_id}-nginx-error",
-                          "timestamp_format": "%Y/%m/%d %H:%M:%S"
+                          "timestamp_format": "%Y/%m/%d %H:%M:%S",
+                          "timezone": "UTC"
+                        },
+                        {
+                          "file_path": "/var/log/gitlab/gitlab-rails/sidekiq.log",
+                          "log_group_name": "${aws_cloudwatch_log_group.gitlab.name}",
+                          "log_stream_name": "{instance_id}-sidekiq",
+                          "timestamp_format": "%Y-%m-%d %H:%M:%S",
+                          "timezone": "UTC"
+                        },
+                        {
+                          "file_path": "/var/log/gitlab/gitlab-rails/application.log",
+                          "log_group_name": "${aws_cloudwatch_log_group.gitlab.name}",
+                          "log_stream_name": "{instance_id}-application",
+                          "timestamp_format": "%Y-%m-%d %H:%M:%S",
+                          "timezone": "UTC"
                         }
                       ]
                     }
@@ -146,16 +174,13 @@ resource "aws_instance" "gitlab" {
               }
               CWAGENTCONFIG
 
-              # Start CloudWatch Agent with new configuration
-              /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json
-              systemctl enable amazon-cloudwatch-agent
-              systemctl start amazon-cloudwatch-agent
+              # Set proper permissions
+              chmod 644 /opt/aws/amazon-cloudwatch-agent/config.json
 
-              # Install GitLab
-              apt-get update
-              apt-get install -y curl openssh-server ca-certificates tzdata perl
-              curl https://packages.gitlab.com/install/repositories/gitlab/gitlab-ee/script.deb.sh | bash
-              EXTERNAL_URL="https://${var.gitlab_domain}" apt-get install gitlab-ee
+              # Start CloudWatch Agent with new configuration
+              /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/config.json
+              systemctl enable amazon-cloudwatch-agent
+              systemctl restart amazon-cloudwatch-agent
 
               # Wait for GitLab to be fully configured
               while ! curl -s http://localhost/-/health > /dev/null; do
@@ -164,6 +189,9 @@ resource "aws_instance" "gitlab" {
 
               # Set root password
               gitlab-rails runner "user = User.find(1); user.password = '${var.gitlab_root_password}'; user.password_confirmation = '${var.gitlab_root_password}'; user.save!"
+
+              # Verify CloudWatch Agent is running
+              systemctl status amazon-cloudwatch-agent
               EOF
 
   tags = {
