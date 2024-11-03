@@ -4,9 +4,10 @@ instance_type = "t3.large"
 environment   = "production"
 
 # GitLab Configuration
-gitlab_domain = "gitlab.example.com"
-volume_size   = 100
+gitlab_domain        = "gitlab.example.com" # DNS is managed by Cloudflare
+gitlab_root_password = "xxxxxxxxxx" # Change this to your desired password
+volume_size          = 100
 
 # Cloudflare Configuration
-cloudflare_zone_id   = "xxx"
-cloudflare_api_token = "xxx"
+cloudflare_zone_id   = "xxxxxxxxxx"
+cloudflare_api_token = "xxxxxxxxxx"
