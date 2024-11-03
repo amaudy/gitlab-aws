@@ -59,6 +59,17 @@ resource "aws_iam_instance_profile" "gitlab_instance_profile" {
   role = aws_iam_role.gitlab_instance_role.name
 }
 
+# Add CloudWatch Log Group
+resource "aws_cloudwatch_log_group" "gitlab" {
+  name              = "/aws/ec2/gitlab"
+  retention_in_days = 30
+
+  tags = {
+    Name        = "gitlab-logs"
+    Environment = var.environment
+  }
+}
+
 resource "aws_instance" "gitlab" {
   ami           = data.aws_ami.ubuntu.id
   instance_type = var.instance_type
@@ -87,6 +98,56 @@ resource "aws_instance" "gitlab" {
               # Install CloudWatch Agent
               apt-get update
               apt-get install -y amazon-cloudwatch-agent
+              
+              # Create CloudWatch Agent configuration
+              cat > /opt/aws/amazon-cloudwatch-agent/bin/config.json <<'CWAGENTCONFIG'
+              {
+                "agent": {
+                  "metrics_collection_interval": 60,
+                  "run_as_user": "root"
+                },
+                "logs": {
+                  "logs_collected": {
+                    "files": {
+                      "collect_list": [
+                        {
+                          "file_path": "/var/log/gitlab/gitlab-rails/production.log",
+                          "log_group_name": "${aws_cloudwatch_log_group.gitlab.name}",
+                          "log_stream_name": "{instance_id}-gitlab-rails",
+                          "timestamp_format": "%Y-%m-%d %H:%M:%S"
+                        },
+                        {
+                          "file_path": "/var/log/gitlab/nginx/gitlab_access.log",
+                          "log_group_name": "${aws_cloudwatch_log_group.gitlab.name}",
+                          "log_stream_name": "{instance_id}-nginx-access",
+                          "timestamp_format": "%d/%b/%Y:%H:%M:%S %z"
+                        },
+                        {
+                          "file_path": "/var/log/gitlab/nginx/gitlab_error.log",
+                          "log_group_name": "${aws_cloudwatch_log_group.gitlab.name}",
+                          "log_stream_name": "{instance_id}-nginx-error",
+                          "timestamp_format": "%Y/%m/%d %H:%M:%S"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "metrics": {
+                  "metrics_collected": {
+                    "mem": {
+                      "measurement": ["mem_used_percent"]
+                    },
+                    "disk": {
+                      "measurement": ["disk_used_percent"],
+                      "resources": ["/"]
+                    }
+                  }
+                }
+              }
+              CWAGENTCONFIG
+
+              # Start CloudWatch Agent with new configuration
+              /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json
               systemctl enable amazon-cloudwatch-agent
               systemctl start amazon-cloudwatch-agent
 
@@ -128,4 +189,29 @@ resource "cloudflare_record" "gitlab" {
 resource "aws_iam_role_policy_attachment" "cloudwatch" {
   role       = aws_iam_role.gitlab_instance_role.name
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+# Add additional IAM policy for CloudWatch Logs
+resource "aws_iam_role_policy" "cloudwatch_logs" {
+  name = "gitlab-cloudwatch-logs-policy"
+  role = aws_iam_role.gitlab_instance_role.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams"
+        ]
+        Resource = [
+          "${aws_cloudwatch_log_group.gitlab.arn}",
+          "${aws_cloudwatch_log_group.gitlab.arn}:*"
+        ]
+      }
+    ]
+  })
 } 
