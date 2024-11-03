@@ -64,6 +64,9 @@ resource "aws_instance" "gitlab" {
   instance_type = var.instance_type
   subnet_id     = data.aws_subnets.default.ids[0] # Use first subnet from default VPC
 
+  # Enable detailed monitoring
+  monitoring = true
+
   # Add IAM instance profile
   iam_instance_profile = aws_iam_instance_profile.gitlab_instance_profile.name
 
@@ -80,6 +83,12 @@ resource "aws_instance" "gitlab" {
               snap install amazon-ssm-agent --classic
               systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service
               systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service
+
+              # Install CloudWatch Agent
+              apt-get update
+              apt-get install -y amazon-cloudwatch-agent
+              systemctl enable amazon-cloudwatch-agent
+              systemctl start amazon-cloudwatch-agent
 
               # Install GitLab
               apt-get update
@@ -111,4 +120,10 @@ resource "cloudflare_record" "gitlab" {
   value   = aws_eip.gitlab.public_ip
   type    = "A"
   proxied = false
+}
+
+# Add CloudWatch monitoring permissions to the IAM role
+resource "aws_iam_role_policy_attachment" "cloudwatch" {
+  role       = aws_iam_role.gitlab_instance_role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 } 
