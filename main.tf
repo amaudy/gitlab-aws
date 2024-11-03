@@ -156,6 +156,14 @@ resource "aws_instance" "gitlab" {
               apt-get install -y curl openssh-server ca-certificates tzdata perl
               curl https://packages.gitlab.com/install/repositories/gitlab/gitlab-ee/script.deb.sh | bash
               EXTERNAL_URL="https://${var.gitlab_domain}" apt-get install gitlab-ee
+
+              # Wait for GitLab to be fully configured
+              while ! curl -s http://localhost/-/health > /dev/null; do
+                sleep 30
+              done
+
+              # Set root password
+              gitlab-rails runner "user = User.find(1); user.password = '${var.gitlab_root_password}'; user.password_confirmation = '${var.gitlab_root_password}'; user.save!"
               EOF
 
   tags = {

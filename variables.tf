@@ -36,4 +36,10 @@ variable "volume_size" {
   description = "Size of the EBS volume in GB"
   type        = number
   default     = 100
+}
+
+variable "gitlab_root_password" {
+  description = "Default password for GitLab root user"
+  type        = string
+  sensitive   = true
 } 
