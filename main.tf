@@ -15,7 +15,7 @@ data "aws_ami" "ubuntu" {
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server-*"]
   }
 
   filter {
@@ -117,9 +117,11 @@ resource "aws_eip" "gitlab" {
 resource "cloudflare_record" "gitlab" {
   zone_id = var.cloudflare_zone_id
   name    = var.gitlab_domain
-  value   = aws_eip.gitlab.public_ip
+  content = aws_eip.gitlab.public_ip
   type    = "A"
   proxied = false
+
+  depends_on = [aws_eip.gitlab]
 }
 
 # Add CloudWatch monitoring permissions to the IAM role
